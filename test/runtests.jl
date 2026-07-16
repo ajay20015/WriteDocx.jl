@@ -387,6 +387,48 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
         reftest_docx(doc, "basic_table")
     end
 
+    @testset "Table width, layout, grid, tabs and bookmarks" begin
+        doc = W.Document(
+            W.Body([
+                W.Section([
+                    W.Table(
+                        [
+                            W.TableRow([
+                                W.TableCell(
+                                    [W.Paragraph([W.Run([W.Text("A")])])],
+                                    W.TableCellProperties(width = W.TableWidth(dxa = 3000)),
+                                ),
+                                W.TableCell([W.Paragraph([W.Run([W.Text("B")])])]),
+                            ]),
+                        ];
+                        grid = W.Twip[W.Twip(3000), W.Twip(3000)],
+                        width = W.TableWidth(pct = 100),
+                        layout = W.TableLayout.fixed,
+                    ),
+                    W.Paragraph(
+                        [W.Run([W.Text("left"), W.Tab(), W.Text("centered")])],
+                        W.ParagraphProperties(
+                            tabs = [
+                                W.TabStop(
+                                    W.Twip(4320);
+                                    alignment = W.TabAlignment.center,
+                                    leader = W.TabLeader.dot,
+                                ),
+                            ],
+                            spacing = W.Spacing(line = 360, line_rule = W.LineRule.at_least),
+                        ),
+                    ),
+                    W.Paragraph([
+                        W.BookmarkStart(1, "target"),
+                        W.Run([W.Text("bookmarked")]),
+                        W.BookmarkEnd(1),
+                    ]),
+                ]),
+            ]),
+        )
+        reftest_docx(doc, "table_width_tabs_bookmarks")
+    end
+
     @testset "Table justification" begin
         tbl(just) = W.Table([
             W.TableRow([

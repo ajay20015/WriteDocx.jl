@@ -228,6 +228,16 @@ is_inline_element(::Type{Break}) = true
 
 Break() = Break(BreakType.text_wrapping)
 
+"""
+    Tab()
+
+A tab character in a [`Run`](@ref). It advances to the next [`TabStop`](@ref)
+defined on the paragraph.
+"""
+struct Tab end
+
+is_inline_element(::Type{Tab}) = true
+
 struct Size
     size::HalfPoint
 end
@@ -643,9 +653,29 @@ An enum that can be either `start`, `stop`, `center`, `both` or `distribute`.
 """
 @enumx Justification start stop center both distribute
 
+"""
+    LineRule
+
+An enum that can be either `auto`, `exact` or `at_least`, setting how a
+paragraph's [`Spacing`](@ref) `line` value is interpreted: `auto` is a multiple
+of single spacing (`line = 240` is single, `360` is 1.5), `exact` is an exact
+height in twips, `at_least` a minimum height in twips.
+"""
+@enumx LineRule auto exact at_least
+
+"""
+    Spacing
+
+Paragraph spacing. `before` and `after` set the space above and below the
+paragraph. `line` sets the line height, interpreted according to `line_rule`
+(a `LineRule`): with `auto`, `line = 240` is single spacing and `360` is 1.5;
+with `exact` or `at_least`, `line` is a height in twips.
+"""
 Base.@kwdef struct Spacing
     before::Maybe{Twip} = nothing
     after::Maybe{Twip} = nothing
+    line::Maybe{Int} = nothing
+    line_rule::Maybe{LineRule.T} = nothing
 end
 
 """
@@ -659,6 +689,41 @@ Base.@kwdef struct Shading
     pattern::ShadingPattern.T = ShadingPattern.clear
     fill::AutomaticDefault{HexColor} = automatic
     color::AutomaticDefault{HexColor} = automatic
+end
+
+"""
+    TabAlignment
+
+An enum that can be either `left`, `center`, `right`, `decimal`, `bar` or `clear`.
+"""
+@enumx TabAlignment left center right decimal bar clear
+
+"""
+    TabLeader
+
+An enum that can be either `none`, `dot`, `hyphen`, `underscore`, `heavy` or
+`middle_dot`, the fill character drawn across the space a tab jumps.
+"""
+@enumx TabLeader none dot hyphen underscore heavy middle_dot
+
+"""
+    TabStop(position::Twip; alignment=TabAlignment.left, leader=TabLeader.none)
+
+A tab stop in a [`ParagraphProperties`](@ref). `position` is measured from the
+left margin; `leader` fills the jumped space (a right-aligned stop with a `dot`
+leader is the classic table-of-contents dotted line).
+"""
+struct TabStop
+    position::Twip
+    alignment::TabAlignment.T
+    leader::TabLeader.T
+end
+TabStop(position::Twip; alignment::TabAlignment.T = TabAlignment.left, leader::TabLeader.T = TabLeader.none) =
+    TabStop(position, alignment, leader)
+
+# Wraps a paragraph's tab stops in the required <w:tabs> container.
+struct TabStops
+    tabs::Vector{TabStop}
 end
 
 """
@@ -684,6 +749,7 @@ Base.@kwdef struct ParagraphProperties
     spacing::Maybe{Spacing} = nothing
     borders::Maybe{ParagraphBorders} = nothing
     shading::Maybe{Shading} = nothing
+    tabs::Maybe{Vector{TabStop}} = nothing
 end
 
 """
@@ -755,6 +821,43 @@ Run(children::AbstractVector; kwargs...) = Run(children, RunProperties(; kwargs.
 is_run_element(::Type{Run}) = true
 
 """
+    TableWidthType
+
+The unit tag stored in a [`TableWidth`](@ref): `pct` (fiftieths of a percent), `dxa` (twips),
+or `auto` (sized to content). Construct widths through [`TableWidth`](@ref) rather than this enum.
+"""
+@enumx TableWidthType pct dxa auto
+
+"""
+    TableWidth(; pct = nothing, dxa = nothing)
+
+Width of a table (`TableProperties.width`) or table cell (`TableCellProperties.width`).
+
+Pass `pct` for a percentage of the surrounding text column; `pct = 100` fills the page
+(Word's "AutoFit to window"). Pass `dxa` for an absolute width in twips. With neither, the
+width is `auto` (sized to content), which is also the behaviour when `width` is left `nothing`.
+"""
+struct TableWidth
+    type::TableWidthType.T
+    value::Int     # pct: fiftieths of a percent (100% -> 5000); dxa: twips; auto: unused
+end
+function TableWidth(; pct = nothing, dxa = nothing)
+    pct === nothing || dxa === nothing ||
+        throw(ArgumentError("TableWidth takes `pct` or `dxa`, not both."))
+    pct !== nothing && return TableWidth(TableWidthType.pct, round(Int, pct * 50))
+    dxa !== nothing && return TableWidth(TableWidthType.dxa, round(Int, dxa))
+    return TableWidth(TableWidthType.auto, 0)
+end
+
+"""
+    TableLayout
+
+An enum that can be either `autofit` or `fixed`. `fixed` honors the column widths
+given by the table grid; `autofit` (Word's default) sizes columns to content.
+"""
+@enumx TableLayout autofit fixed
+
+"""
     TableProperties(; kwargs...)
 
 Holds properties for a [`Table`](@ref).
@@ -764,11 +867,15 @@ All properties are optional.
 
 | Keyword | Description |
 | :-- | :-- |
+| `width::TableWidth` | The table width, e.g. `TableWidth(pct = 100)` to fill the page. |
 | `margins::TableLevelCellMargins` | Margins for all cells in the table. |
 | `spacing::Twip` | The space between adjacent cells and the edges of the table. |
 | `justification::`[`Justification`](@ref)`.T` | The justification of the table. |
+| `layout::`[`TableLayout`](@ref)`.T` | The layout algorithm: `fixed` honors the specified column widths, `autofit` (Word's default) sizes columns to content. |
 """
 Base.@kwdef struct TableProperties
+    width::Maybe{TableWidth} = nothing
+    layout::Maybe{TableLayout.T} = nothing
     margins::Maybe{TableLevelCellMargins} = nothing
     spacing::Maybe{Twip} = nothing
     justification::Maybe{Justification.T} = nothing
@@ -818,6 +925,7 @@ All properties are optional.
 
 | Keyword | Description |
 | :-- | :-- |
+| `width::TableWidth` | The width of the cell. |
 | `borders::TableCellBorders` | The border style of the cell. |
 | `vertical_merge::Bool` | Should be set to `true` if this cell should be merged with the one above it. |
 | `gridspan::Int` | The number of cells this cell should span in horizontal direction. |
@@ -826,6 +934,7 @@ All properties are optional.
 | `hide_mark::Bool` | If `true`, hides the editor mark so that the table cell can fully collapse if it's empty. |
 """
 Base.@kwdef struct TableCellProperties
+    width::Maybe{TableWidth} = nothing
     borders::Maybe{TableCellBorders} = nothing
     vertical_merge::Maybe{Bool} = nothing
     gridspan::Maybe{Int} = nothing
@@ -875,6 +984,32 @@ Every [`ComplexField`](@ref) element must be paired with this element.
 struct ComplexFieldEnd end
 
 is_run_element(::Type{ComplexFieldEnd}) = true
+
+"""
+    BookmarkStart(id::Int, name::String)
+
+Marks the start of a bookmark. `name` is the target that internal hyperlinks and
+cross-references point at (via a `HYPERLINK \\l` field or `w:anchor`); `id` is a numeric
+handle that must be unique across the whole document and must match the paired
+[`BookmarkEnd`](@ref). Content to be bookmarked may appear between the two.
+"""
+struct BookmarkStart
+    id::Int
+    name::String
+end
+
+is_run_element(::Type{BookmarkStart}) = true
+
+"""
+    BookmarkEnd(id::Int)
+
+Marks the end of the bookmark opened by the [`BookmarkStart`](@ref) with the same `id`.
+"""
+struct BookmarkEnd
+    id::Int
+end
+
+is_run_element(::Type{BookmarkEnd}) = true
 
 is_block_element(x) = false
 
@@ -933,20 +1068,25 @@ end
 TableRow(cells; kwargs...) = TableRow(cells, TableRowProperties(; kwargs...))
 
 """
-    Table(rows::Vector{TableRow}, properties::TableProperties)
-    Table(rows; kwargs...)
+    Table(rows::Vector{TableRow}, properties::TableProperties, grid = Twip[])
+    Table(rows; grid = Twip[], kwargs...)
 
-A table which can hold a vector of [`TableRow`](@ref)s.
-The second convenience constructor forwards all keyword arguments to [`TableProperties`](@ref).
+A table which can hold a vector of [`TableRow`](@ref)s. `grid` gives explicit
+column widths (a `<w:tblGrid>`); a fixed-layout table (`TableProperties.layout =
+TableLayout.fixed`) needs one whose widths sum to the table width. The second
+convenience constructor forwards remaining keyword arguments to [`TableProperties`](@ref).
 """
 struct Table
     rows::Vector{TableRow}
     properties::TableProperties
+    grid::Vector{Twip}
+
+    Table(rows, properties, grid = Twip[]) = new(rows, properties, grid)
 end
 
 is_block_element(::Type{Table}) = true
 
-Table(rows; kwargs...) = Table(rows, TableProperties(; kwargs...))
+Table(rows; grid::Vector{Twip} = Twip[], kwargs...) = Table(rows, TableProperties(; kwargs...), grid)
 
 @enumx PageOrientation landscape portrait
 
@@ -1884,7 +2024,9 @@ children(section::Section) = section.children
 children(paragraph::Paragraph) = paragraph.children
 children(run::Run) = run.children
 children(text::Text) = (text.text,)
-children(table::Table) = table.rows
+children(table::Table) =
+    isempty(table.grid) ? table.rows :
+    [xml("w:tblGrid", [xml("w:gridCol", "w:w" => w) for w in table.grid]); table.rows]
 children(tablerow::TableRow) = tablerow.cells
 children(tablecell::TableCell) = tablecell.children
 children(h::Header) = h.children
@@ -1908,6 +2050,7 @@ function children(p::ParagraphProperties)
     p.style === nothing || push!(c, ParagraphStyle(p.style))
     p.run_properties === nothing || push!(c, p.run_properties)
     p.justification === nothing || push!(c, p.justification)
+    p.tabs === nothing || push!(c, TabStops(p.tabs))
     p.spacing === nothing || push!(c, p.spacing)
     p.borders === nothing || push!(c, p.borders)
     p.shading === nothing || push!(c, p.shading)
@@ -1916,6 +2059,8 @@ function children(p::ParagraphProperties)
     something(p.keep_lines, false) && push!(c, xml("w:keepLines"))
     return c
 end
+
+children(t::TabStops) = t.tabs
 
 function children(p::Columns)
     c = []
@@ -1927,6 +2072,7 @@ end
 
 function children(p::TableCellProperties)
     c = []
+    p.width === nothing || push!(c, xml("w:tcW", "w:type" => p.width.type, "w:w" => p.width.value))
     p.borders === nothing || push!(c, p.borders)
     p.vertical_merge === nothing || push!(c, VerticalMerge(p.vertical_merge))
     p.gridspan === nothing || push!(c, GridSpan(p.gridspan))
@@ -1937,10 +2083,13 @@ function children(p::TableCellProperties)
 end
 
 function children(p::TableProperties)
+    # Child order follows the CT_TblPrBase schema sequence: tblW, tblJc, tblCellSpacing, tblLayout, tblCellMar.
     c = []
-    p.margins === nothing || push!(c, p.margins)
-    p.spacing === nothing || push!(c, xml("w:tblCellSpacing", "w:w" => p.spacing))
+    p.width === nothing || push!(c, xml("w:tblW", "w:type" => p.width.type, "w:w" => p.width.value))
     p.justification === nothing || push!(c, p.justification)
+    p.spacing === nothing || push!(c, xml("w:tblCellSpacing", "w:type" => "dxa", "w:w" => p.spacing))
+    p.layout === nothing || push!(c, xml("w:tblLayout", "w:type" => p.layout))
+    p.margins === nothing || push!(c, p.margins)
     return c
 end
 
@@ -2051,6 +2200,7 @@ function attributes(t::Text)
     return attrs
 end
 attributes(b::Break) = (("w:type", b.type),)
+attributes(t::TabStop) = (("w:val", t.alignment), ("w:leader", t.leader), ("w:pos", t.position))
 function attributes(x::Union{Header, Footer})
     [
         ("xmlns:w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main"),
@@ -2063,10 +2213,14 @@ function attributes(s::SimpleField)
     s.dirty === nothing || push!(attrs, ("w:dirty", s.dirty))
     return attrs
 end
+attributes(b::BookmarkStart) = (("w:id", b.id), ("w:name", b.name))
+attributes(b::BookmarkEnd) = (("w:id", b.id),)
 function attributes(s::Spacing)
     attrs = Tuple{String, Any}[]
     s.before === nothing || push!(attrs, ("w:before", s.before))
     s.after === nothing || push!(attrs, ("w:after", s.after))
+    s.line === nothing || push!(attrs, ("w:line", s.line))
+    s.line_rule === nothing || push!(attrs, ("w:lineRule", s.line_rule))
     return attrs
 end
 function attributes(s::Shading)
@@ -2141,9 +2295,14 @@ xmltag(::TableCellMargins) = "w:tcMar"
 xmltag(::TableLevelCellMargins) = "w:tblCellMar"
 xmltag(::VerticalAlign.T) = "w:vAlign"
 xmltag(::Break) = "w:br"
+xmltag(::Tab) = "w:tab"
+xmltag(::TabStop) = "w:tab"
+xmltag(::TabStops) = "w:tabs"
 xmltag(::Header) = "w:hdr"
 xmltag(::Footer) = "w:ftr"
 xmltag(::SimpleField) = "w:fldSimple"
+xmltag(::BookmarkStart) = "w:bookmarkStart"
+xmltag(::BookmarkEnd) = "w:bookmarkEnd"
 xmltag(::Spacing) = "w:spacing"
 xmltag(::TableRowProperties) = "w:trPr"
 xmltag(::TableRowHeight) = "w:trHeight"
@@ -2162,8 +2321,13 @@ xmlstring(p::PageOrientation.T) = string(p)
 xmlstring(p::PageVerticalAlign.T) = string(p)
 xmlstring(p::Justification.T) = p === Justification.stop ? "end" : string(p)
 xmlstring(l::Length) = string(round(Int, l.value)) # all sizes should be converted at this point and word only wants integers
+xmlstring(l::TableLayout.T) = string(l)
+xmlstring(t::TableWidthType.T) = string(t)
 xmlstring(v::VerticalAlign.T) = string(v)
 xmlstring(b::BreakType.T) = snake_to_camel(string(b))
+xmlstring(a::TabAlignment.T) = string(a)
+xmlstring(l::TabLeader.T) = snake_to_camel(string(l))
+xmlstring(l::LineRule.T) = snake_to_camel(string(l))
 xmlstring(b::HeightRule.T) = snake_to_camel(string(b))
 xmlstring(b::ShadingPattern.T) = snake_to_camel(string(b))
 end

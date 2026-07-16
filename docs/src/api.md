@@ -30,4 +30,9 @@ WriteDocx.UnderlinePattern
 WriteDocx.ShadingPattern
 WriteDocx.VerticalAlign
 WriteDocx.VerticalAlignment
+WriteDocx.TableLayout
+WriteDocx.TableWidthType
+WriteDocx.TabAlignment
+WriteDocx.TabLeader
+WriteDocx.LineRule
 ```
