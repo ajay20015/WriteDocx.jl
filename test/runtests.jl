@@ -1192,7 +1192,8 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
                 parts = Dict{String,String}()
                 for (root, _, files) in walkdir(zipdir)
                     for file in files
-                        parts[relpath(joinpath(root, file), zipdir)] = read(joinpath(root, file), String)
+                        key = replace(relpath(joinpath(root, file), zipdir), "\\" => "/")
+                        parts[key] = read(joinpath(root, file), String)
                     end
                 end
                 return parts
