@@ -404,6 +404,14 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
                         grid = W.Twip[W.Twip(3000), W.Twip(3000)],
                         width = W.TableWidth(pct = 100),
                         layout = W.TableLayout.fixed,
+                        justification = W.Justification.center,
+                        spacing = W.Twip(50),
+                        margins = W.TableLevelCellMargins(
+                            top = 5W.pt,
+                            bottom = 5W.pt,
+                            start = 5W.pt,
+                            stop = 5W.pt,
+                        ),
                     ),
                     W.Paragraph(
                         [W.Run([W.Text("left"), W.Tab(), W.Text("centered")])],

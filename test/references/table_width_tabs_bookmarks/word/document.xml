@@ -4,7 +4,15 @@
     <w:tbl>
       <w:tblPr>
         <w:tblW w:type="pct" w:w="5000"/>
+        <w:jc w:val="center"/>
+        <w:tblCellSpacing w:type="dxa" w:w="50"/>
         <w:tblLayout w:type="fixed"/>
+        <w:tblCellMar>
+          <w:top w:w="100"/>
+          <w:bottom w:w="100"/>
+          <w:start w:w="100"/>
+          <w:end w:w="100"/>
+        </w:tblCellMar>
       </w:tblPr>
       <w:tblGrid>
         <w:gridCol w:w="3000"/>
