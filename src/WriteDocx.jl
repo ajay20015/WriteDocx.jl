@@ -1180,14 +1180,26 @@ end
 struct Document
     body::Body
     styles::Styles
+    update_fields::Bool
 end
 
 """
-    Document(body::Body; styles::Styles = Styles([]))
+    Document(body::Body; styles::Styles = Styles([]), update_fields::Bool = false)
 
 The root object containing all other elements that make up the document.
+
+Set `update_fields = true` to have Word recompute every field (for example a hand-built
+table of contents' `PAGEREF` page numbers) the first time the document is opened, by writing
+`word/settings.xml` with `<w:updateFields w:val="true"/>`. Defaults to `false`, so existing
+callers see no change.
 """
-Document(body::Body; styles::Styles = Styles([])) = Document(body, styles)
+Document(body::Body; styles::Styles = Styles([]), update_fields::Bool = false) =
+    Document(body, styles, update_fields)
+
+# Pre-existing 2-positional-arg form (body, styles), from when Document had only those two fields —
+# kept so adding `update_fields` doesn't break a caller using this form directly instead of the
+# `styles = ...` keyword.
+Document(body::Body, styles::Styles) = Document(body, styles, false)
 
 function save(path, document::Document)
     if !endswith(path, ".docx")
@@ -1219,6 +1231,11 @@ function save(path, document::Document)
 
         f = ZipFile.addfile(zipwriter, "word/styles.xml"; method = ZipFile.Deflate)
         E.prettyprint(f, styles_xml(document.styles))
+
+        if document.update_fields
+            f = ZipFile.addfile(zipwriter, "word/settings.xml"; method = ZipFile.Deflate)
+            print(f, settings_xml())
+        end
 
         f = ZipFile.addfile(zipwriter, "word/document.xml"; method = ZipFile.Deflate)
         E.prettyprint(f, to_xml(document, rels))
@@ -1458,6 +1475,15 @@ function resolve_rel!(x::StyleRel, i, dir, prefix)
     )
 end
 
+struct SettingsRel end
+
+function resolve_rel!(x::SettingsRel, i, dir, prefix)
+    return Relationship(
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
+        prefix * "settings.xml",
+    )
+end
+
 function resolve_rel!(x::Image, i, dir, prefix)
     mktempdir() do tempdir
         imgpath = get_image_file(x, tempdir)
@@ -1491,6 +1517,7 @@ end
 function gather_rels(document::Document, zipdir)
     rels = OrderedDict{Any, Int}()
     add_rel!(rels, StyleRel())
+    document.update_fields && add_rel!(rels, SettingsRel())
     gather_rels!(rels, zipdir, document.body)
     return rels
 end
@@ -1566,6 +1593,8 @@ function content_types(rels)
             println(io, "    <Override PartName=\"/word/header$i.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\" />")
         elseif rel isa Footer
             println(io, "    <Override PartName=\"/word/footer$i.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\" />")
+        elseif rel isa SettingsRel
+            println(io, "    <Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\" />")
         end
     end
 
@@ -1586,6 +1615,13 @@ function rels_xml(resolved_rels)
     end
 
     return doc
+end
+
+function settings_xml()
+    """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:updateFields w:val="true"/></w:settings>
+    """
 end
 
 function global_rels_xml()

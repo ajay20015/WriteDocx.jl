@@ -1180,6 +1180,42 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
         reftest_docx(doc, "table_of_figures")
     end
 
+    @testset "update_fields (word/settings.xml)" begin
+        body = W.Body([W.Section([W.Paragraph([W.Run([W.Text("hello")])])])])
+
+        function docx_parts(doc::W.Document)
+            mktempdir() do dir
+                docxpath = joinpath(dir, "temp.docx")
+                zipdir = joinpath(dir, "unzipped")
+                W.save(docxpath, doc)
+                unzip(docxpath, zipdir)
+                parts = Dict{String,String}()
+                for (root, _, files) in walkdir(zipdir)
+                    for file in files
+                        parts[relpath(joinpath(root, file), zipdir)] = read(joinpath(root, file), String)
+                    end
+                end
+                return parts
+            end
+        end
+
+        @testset "default (update_fields = false): no settings.xml, existing callers unaffected" begin
+            parts = docx_parts(W.Document(body))
+            @test !haskey(parts, "word/settings.xml")
+            @test !occursin("settings.xml", parts["[Content_Types].xml"])
+            @test !occursin("relationships/settings", parts["word/_rels/document.xml.rels"])
+        end
+
+        @testset "update_fields = true: settings.xml written and wired into rels + content types" begin
+            parts = docx_parts(W.Document(body; update_fields = true))
+            @test haskey(parts, "word/settings.xml")
+            @test occursin("<w:updateFields w:val=\"true\"/>", parts["word/settings.xml"])
+            @test occursin("PartName=\"/word/settings.xml\"", parts["[Content_Types].xml"])
+            @test occursin("relationships/settings", parts["word/_rels/document.xml.rels"])
+            @test occursin("Target=\"settings.xml\"", parts["word/_rels/document.xml.rels"])
+        end
+    end
+
     @testset "Length calculations" begin
         @test 4 * W.cm == W.Centimeter(4)
         @test W.cm * 4 == 4 * W.cm
