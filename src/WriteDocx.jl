@@ -1321,6 +1321,8 @@ struct Document
     body::Body
     styles::Styles
     update_fields::Bool
+
+    Document(body::Body, styles::Styles, update_fields::Bool = false) = new(body, styles, update_fields)
 end
 
 """
@@ -1335,11 +1337,6 @@ callers see no change.
 """
 Document(body::Body; styles::Styles = Styles([]), update_fields::Bool = false) =
     Document(body, styles, update_fields)
-
-# Pre-existing 2-positional-arg form (body, styles), from when Document had only those two fields —
-# kept so adding `update_fields` doesn't break a caller using this form directly instead of the
-# `styles = ...` keyword.
-Document(body::Body, styles::Styles) = Document(body, styles, false)
 
 function save(path, document::Document)
     if !endswith(path, ".docx")
