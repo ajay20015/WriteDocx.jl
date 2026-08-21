@@ -396,13 +396,13 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
                             W.TableRow([
                                 W.TableCell(
                                     [W.Paragraph([W.Run([W.Text("A")])])],
-                                    W.TableCellProperties(width = W.TableWidth(dxa = 3000)),
+                                    W.TableCellProperties(width = 150W.pt),
                                 ),
                                 W.TableCell([W.Paragraph([W.Run([W.Text("B")])])]),
                             ]),
                         ];
-                        grid = W.Twip[W.Twip(3000), W.Twip(3000)],
-                        width = W.TableWidth(pct = 100),
+                        grid = [150W.pt, 150W.pt],
+                        width = 100W.percent,
                         layout = W.TableLayout.fixed,
                         justification = W.Justification.center,
                         spacing = W.Twip(50),
@@ -418,12 +418,12 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
                         W.ParagraphProperties(
                             tabs = [
                                 W.TabStop(
-                                    W.Twip(4320);
+                                    216W.pt;
                                     alignment = W.TabAlignment.center,
                                     leader = W.TabLeader.dot,
                                 ),
                             ],
-                            spacing = W.Spacing(line = 360, line_rule = W.LineRule.at_least),
+                            spacing = W.Spacing(line = W.AtLeast(18W.pt)),
                         ),
                     ),
                     W.Paragraph([
@@ -1238,5 +1238,46 @@ Base.show(io::IO, ::MIME"image/png", p::PNG) = write(io, p.bytes)
         @test W.Point(6 * W.cm) / W.Inch(2 * W.cm) ≈ 3.0
         @test 2 * W.inch - 144 * W.pt == 0 * W.inch
         @test -2 * W.inch + 144 * W.pt == 0 * W.inch
+        @test 50 * W.percent == W.Percent(50)
+        @test W.percent * 50 == 50 * W.percent
+    end
+
+    @testset "Table width units" begin
+        # The unit tag and the number Word stores both follow from the type of the width given.
+        table_width(w) = string(only(W.children(W.TableProperties(width = w))))
+        cell_width(w) = string(only(W.children(W.TableCellProperties(width = w))))
+
+        @test table_width(100W.percent) == """<w:tblW w:type="pct" w:w="5000"/>"""
+        @test table_width(50W.percent) == """<w:tblW w:type="pct" w:w="2500"/>"""
+        @test table_width(2W.inch) == """<w:tblW w:type="dxa" w:w="2880"/>"""
+        @test table_width(W.Twip(3000)) == """<w:tblW w:type="dxa" w:w="3000"/>"""
+        @test table_width(W.automatic) == """<w:tblW w:type="auto" w:w="0"/>"""
+        # A width wraps its value, so the wrapper and the bare value mean the same thing.
+        @test table_width(W.TableWidth(2W.inch)) == table_width(2W.inch)
+        @test cell_width(2W.inch) == """<w:tcW w:type="dxa" w:w="2880"/>"""
+        @test cell_width(100W.percent) == """<w:tcW w:type="pct" w:w="5000"/>"""
+    end
+
+    @testset "Line spacing units" begin
+        line_attrs(line) = Dict(k => W.xmlstring(v) for (k, v) in W.attributes(W.Spacing(; line)))
+
+        @test line_attrs(100W.percent) == Dict("w:line" => "240", "w:lineRule" => "auto")
+        @test line_attrs(150W.percent) == Dict("w:line" => "360", "w:lineRule" => "auto")
+        @test line_attrs(14W.pt) == Dict("w:line" => "280", "w:lineRule" => "exact")
+        @test line_attrs(W.AtLeast(14W.pt)) == Dict("w:line" => "280", "w:lineRule" => "atLeast")
+        @test isempty(W.attributes(W.Spacing()))
+        @test Dict(k => W.xmlstring(v) for (k, v) in
+                   W.attributes(W.Spacing(before = 6W.pt, after = 6W.pt, line = 14W.pt))) == Dict(
+            "w:before" => "120",
+            "w:after" => "120",
+            "w:line" => "280",
+            "w:lineRule" => "exact",
+        )
+    end
+
+    @testset "Tab stops and grids take any length" begin
+        @test W.TabStop(3W.inch).position == W.Twip(4320)
+        @test W.Table(W.TableRow[]; grid = [1W.inch, 2W.cm]).grid ==
+              [W.Twip(1W.inch), W.Twip(2W.cm)]
     end
 end

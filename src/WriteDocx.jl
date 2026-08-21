@@ -123,6 +123,22 @@ Base.:(/)(l::L, r::Real) where L <: Length = L(l.value / r)
 Base.:(+)(l::L, l2::Length) where L <: Length = L(l.value + convert(L, l2).value)
 Base.:(-)(l::L, l2::Length) where L <: Length = L(l.value - convert(L, l2).value)
 
+"""
+    Percent(value::Float64)
+
+A relative measure, for the places where Word accepts a proportion of some other
+quantity instead of an absolute [`Length`](@ref), such as the `width` of a
+[`TableProperties`](@ref) or the `line` of a [`Spacing`](@ref).
+For convenience, the constant `percent` is provided for `Percent(1)`.
+"""
+struct Percent
+    value::Float64
+end
+const percent = Percent(1)
+
+Base.:(*)(x::Real, p::Percent) = Percent(p.value * x)
+Base.:(*)(p::Percent, x::Real) = x * p
+
 const Maybe = Union{Nothing, <:Any}
 
 macro partialkw(expr::Expr)
@@ -654,28 +670,29 @@ An enum that can be either `start`, `stop`, `center`, `both` or `distribute`.
 @enumx Justification start stop center both distribute
 
 """
-    LineRule
+    AtLeast(length)
 
-An enum that can be either `auto`, `exact` or `at_least`, setting how a
-paragraph's [`Spacing`](@ref) `line` value is interpreted: `auto` is a multiple
-of single spacing (`line = 240` is single, `360` is 1.5), `exact` is an exact
-height in twips, `at_least` a minimum height in twips.
+A minimum [`Length`](@ref), for the places where Word may grow a measure beyond
+the value given to fit its content, such as the `line` of a [`Spacing`](@ref).
 """
-@enumx LineRule auto exact at_least
+struct AtLeast
+    length::Twip
+end
 
 """
-    Spacing
+    Spacing(; before = nothing, after = nothing, line = nothing)
 
 Paragraph spacing. `before` and `after` set the space above and below the
-paragraph. `line` sets the line height, interpreted according to `line_rule`
-(a `LineRule`): with `auto`, `line = 240` is single spacing and `360` is 1.5;
-with `exact` or `at_least`, `line` is a height in twips.
+paragraph. `line` sets the line height and takes one of three kinds of value:
+
+  - a [`Percent`](@ref) of single spacing, so `line = 150percent` is one-and-a-half spacing
+  - a [`Length`](@ref), for lines fixed at exactly that height, such as `line = 14pt`
+  - an [`AtLeast`](@ref), for a height that may grow to fit tall content
 """
 Base.@kwdef struct Spacing
     before::Maybe{Twip} = nothing
     after::Maybe{Twip} = nothing
-    line::Maybe{Int} = nothing
-    line_rule::Maybe{LineRule.T} = nothing
+    line::Maybe{Union{Length, Percent, AtLeast}} = nothing
 end
 
 """
@@ -707,7 +724,7 @@ An enum that can be either `none`, `dot`, `hyphen`, `underscore`, `heavy` or
 @enumx TabLeader none dot hyphen underscore heavy middle_dot
 
 """
-    TabStop(position::Twip; alignment=TabAlignment.left, leader=TabLeader.none)
+    TabStop(position::Length; alignment = TabAlignment.left, leader = TabLeader.none)
 
 A tab stop in a [`ParagraphProperties`](@ref). `position` is measured from the
 left margin; `leader` fills the jumped space (a right-aligned stop with a `dot`
@@ -718,7 +735,7 @@ struct TabStop
     alignment::TabAlignment.T
     leader::TabLeader.T
 end
-TabStop(position::Twip; alignment::TabAlignment.T = TabAlignment.left, leader::TabLeader.T = TabLeader.none) =
+TabStop(position::Length; alignment::TabAlignment.T = TabAlignment.left, leader::TabLeader.T = TabLeader.none) =
     TabStop(position, alignment, leader)
 
 # Wraps a paragraph's tab stops in the required <w:tabs> container.
@@ -821,33 +838,24 @@ Run(children::AbstractVector; kwargs...) = Run(children, RunProperties(; kwargs.
 is_run_element(::Type{Run}) = true
 
 """
-    TableWidthType
+    TableWidth(value)
 
-The unit tag stored in a [`TableWidth`](@ref): `pct` (fiftieths of a percent), `dxa` (twips),
-or `auto` (sized to content). Construct widths through [`TableWidth`](@ref) rather than this enum.
-"""
-@enumx TableWidthType pct dxa auto
+The width of a table (`TableProperties.width`) or table cell (`TableCellProperties.width`),
+which is one of:
 
-"""
-    TableWidth(; pct = nothing, dxa = nothing)
+  - a [`Percent`](@ref) of the surrounding text column, so `100percent` fills it
+    (Word's "AutoFit to window")
+  - a [`Length`](@ref), for an absolute width such as `12cm`
+  - `automatic`, sizing the table or cell to its content
 
-Width of a table (`TableProperties.width`) or table cell (`TableCellProperties.width`).
-
-Pass `pct` for a percentage of the surrounding text column; `pct = 100` fills the page
-(Word's "AutoFit to window"). Pass `dxa` for an absolute width in twips. With neither, the
-width is `auto` (sized to content), which is also the behaviour when `width` is left `nothing`.
+The bare value can be passed as the `width` as well, so `width = 100percent` and
+`width = TableWidth(100percent)` are equivalent.
 """
 struct TableWidth
-    type::TableWidthType.T
-    value::Int     # pct: fiftieths of a percent (100% -> 5000); dxa: twips; auto: unused
+    value::Union{Length, Percent, Automatic}
 end
-function TableWidth(; pct = nothing, dxa = nothing)
-    pct === nothing || dxa === nothing ||
-        throw(ArgumentError("TableWidth takes `pct` or `dxa`, not both."))
-    pct !== nothing && return TableWidth(TableWidthType.pct, round(Int, pct * 50))
-    dxa !== nothing && return TableWidth(TableWidthType.dxa, round(Int, dxa))
-    return TableWidth(TableWidthType.auto, 0)
-end
+
+Base.convert(::Type{TableWidth}, value::Union{Length, Percent, Automatic}) = TableWidth(value)
 
 """
     TableLayout
@@ -867,7 +875,7 @@ All properties are optional.
 
 | Keyword | Description |
 | :-- | :-- |
-| `width::TableWidth` | The table width, e.g. `TableWidth(pct = 100)` to fill the page. |
+| `width::`[`TableWidth`](@ref) | The table width, e.g. `100percent` to fill the page or `12cm`. |
 | `margins::TableLevelCellMargins` | Margins for all cells in the table. |
 | `spacing::Twip` | The space between adjacent cells and the edges of the table. |
 | `justification::`[`Justification`](@ref)`.T` | The justification of the table. |
@@ -925,7 +933,7 @@ All properties are optional.
 
 | Keyword | Description |
 | :-- | :-- |
-| `width::TableWidth` | The width of the cell. |
+| `width::`[`TableWidth`](@ref) | The width of the cell, e.g. `50percent` or `4cm`. |
 | `borders::TableCellBorders` | The border style of the cell. |
 | `vertical_merge::Bool` | Should be set to `true` if this cell should be merged with the one above it. |
 | `gridspan::Int` | The number of cells this cell should span in horizontal direction. |
@@ -1071,10 +1079,11 @@ TableRow(cells; kwargs...) = TableRow(cells, TableRowProperties(; kwargs...))
     Table(rows::Vector{TableRow}, properties::TableProperties, grid = Twip[])
     Table(rows; grid = Twip[], kwargs...)
 
-A table which can hold a vector of [`TableRow`](@ref)s. `grid` gives explicit
-column widths (a `<w:tblGrid>`); a fixed-layout table (`TableProperties.layout =
-TableLayout.fixed`) needs one whose widths sum to the table width. The second
-convenience constructor forwards remaining keyword arguments to [`TableProperties`](@ref).
+A table which can hold a vector of [`TableRow`](@ref)s. `grid` gives explicit column
+widths as [`Length`](@ref)s (a `<w:tblGrid>`), so `grid = [4cm, 2cm]` is accepted; a
+fixed-layout table (`TableProperties.layout = TableLayout.fixed`) needs one whose widths
+sum to the table width. The second convenience constructor forwards remaining keyword
+arguments to [`TableProperties`](@ref).
 """
 struct Table
     rows::Vector{TableRow}
@@ -1086,7 +1095,8 @@ end
 
 is_block_element(::Type{Table}) = true
 
-Table(rows; grid::Vector{Twip} = Twip[], kwargs...) = Table(rows, TableProperties(; kwargs...), grid)
+Table(rows; grid::AbstractVector{<:Length} = Twip[], kwargs...) =
+    Table(rows, TableProperties(; kwargs...), grid)
 
 @enumx PageOrientation landscape portrait
 
@@ -2070,9 +2080,16 @@ function children(p::Columns)
     return c
 end
 
+# `w:tblW` and `w:tcW` pair a number with the unit tag that gives it meaning, and Word measures
+# percentages in fiftieths of a percent.
+width_attributes(w::TableWidth) = width_attributes(w.value)
+width_attributes(l::Length) = ("w:type" => "dxa", "w:w" => Twip(l))
+width_attributes(p::Percent) = ("w:type" => "pct", "w:w" => round(Int, 50 * p.value))
+width_attributes(::Automatic) = ("w:type" => "auto", "w:w" => 0)
+
 function children(p::TableCellProperties)
     c = []
-    p.width === nothing || push!(c, xml("w:tcW", "w:type" => p.width.type, "w:w" => p.width.value))
+    p.width === nothing || push!(c, xml("w:tcW", width_attributes(p.width)...))
     p.borders === nothing || push!(c, p.borders)
     p.vertical_merge === nothing || push!(c, VerticalMerge(p.vertical_merge))
     p.gridspan === nothing || push!(c, GridSpan(p.gridspan))
@@ -2085,7 +2102,7 @@ end
 function children(p::TableProperties)
     # Child order follows the CT_TblPrBase schema sequence: tblW, tblJc, tblCellSpacing, tblLayout, tblCellMar.
     c = []
-    p.width === nothing || push!(c, xml("w:tblW", "w:type" => p.width.type, "w:w" => p.width.value))
+    p.width === nothing || push!(c, xml("w:tblW", width_attributes(p.width)...))
     p.justification === nothing || push!(c, p.justification)
     p.spacing === nothing || push!(c, xml("w:tblCellSpacing", "w:type" => "dxa", "w:w" => p.spacing))
     p.layout === nothing || push!(c, xml("w:tblLayout", "w:type" => p.layout))
@@ -2215,12 +2232,17 @@ function attributes(s::SimpleField)
 end
 attributes(b::BookmarkStart) = (("w:id", b.id), ("w:name", b.name))
 attributes(b::BookmarkEnd) = (("w:id", b.id),)
+# `w:line` is a bare number whose meaning comes from `w:lineRule`, so the rule follows from the
+# kind of value the user passed. Word counts a proportion in 240ths of a line and the rest in twips.
+line_attributes(p::Percent) = (("w:line", round(Int, 2.4 * p.value)), ("w:lineRule", "auto"))
+line_attributes(l::Length) = (("w:line", Twip(l)), ("w:lineRule", "exact"))
+line_attributes(a::AtLeast) = (("w:line", a.length), ("w:lineRule", "atLeast"))
+
 function attributes(s::Spacing)
     attrs = Tuple{String, Any}[]
     s.before === nothing || push!(attrs, ("w:before", s.before))
     s.after === nothing || push!(attrs, ("w:after", s.after))
-    s.line === nothing || push!(attrs, ("w:line", s.line))
-    s.line_rule === nothing || push!(attrs, ("w:lineRule", s.line_rule))
+    s.line === nothing || append!(attrs, line_attributes(s.line))
     return attrs
 end
 function attributes(s::Shading)
@@ -2322,12 +2344,10 @@ xmlstring(p::PageVerticalAlign.T) = string(p)
 xmlstring(p::Justification.T) = p === Justification.stop ? "end" : string(p)
 xmlstring(l::Length) = string(round(Int, l.value)) # all sizes should be converted at this point and word only wants integers
 xmlstring(l::TableLayout.T) = string(l)
-xmlstring(t::TableWidthType.T) = string(t)
 xmlstring(v::VerticalAlign.T) = string(v)
 xmlstring(b::BreakType.T) = snake_to_camel(string(b))
 xmlstring(a::TabAlignment.T) = string(a)
 xmlstring(l::TabLeader.T) = snake_to_camel(string(l))
-xmlstring(l::LineRule.T) = snake_to_camel(string(l))
 xmlstring(b::HeightRule.T) = snake_to_camel(string(b))
 xmlstring(b::ShadingPattern.T) = snake_to_camel(string(b))
 end
